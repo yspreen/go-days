@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -28,6 +29,10 @@ func insertMessage(key string, newMessage Message) {
 	syncMap.Store(key, append(old, []Message{newMessage}...))
 }
 
+func statusHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "ok")
+}
+
 func main() {
 	insertMessage("test", Message{
 		Sender: uuid.New(),
@@ -38,4 +43,7 @@ func main() {
 	val, _ := loadMessages("test")
 	json, _ := json.Marshal(val)
 	fmt.Print("res: ", string(json))
+
+	http.HandleFunc("/status", statusHandler)
+	http.ListenAndServe(":8081", nil)
 }
