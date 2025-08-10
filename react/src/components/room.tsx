@@ -8,6 +8,12 @@ interface Message {
   text: string;
   time: Date;
 }
+interface MessageStringDate {
+  id: string;
+  sender: string;
+  text: string;
+  time: string;
+}
 
 const MessageRow = ({
   message,
