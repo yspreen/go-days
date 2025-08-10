@@ -86,6 +86,32 @@ function parseWsMessage(msg: MessageStringDate) {
 export const RoomComponent = ({ roomId = "" }) => {
   const [myUuid, setMyUuid] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [message, setMessage] = useState("");
+
+  // Scroll management for the messages list
+  const listRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const SCROLL_THRESHOLD = 24; // px tolerance
+
+  const updateIsAtBottom = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom <= SCROLL_THRESHOLD;
+    atBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  };
+
+  const scrollToBottom = (smooth = false) => {
+    const el = listRef.current;
+    if (!el) return;
+    const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
+    // Ensure DOM is updated before scrolling
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    });
+  };
 
   // Create WebSocket connection.
   const host =
@@ -123,6 +149,9 @@ export const RoomComponent = ({ roomId = "" }) => {
 
     socket.addEventListener("open", () => {
       setMessages([]);
+      // Reset scroll state on new connection
+      atBottomRef.current = true;
+      setIsAtBottom(true);
       socket.send(
         JSON.stringify({
           type: "auth",
@@ -147,7 +176,23 @@ export const RoomComponent = ({ roomId = "" }) => {
     connectWs();
   }, []);
 
-  const [message, setMessage] = useState("");
+  // Attach scroll listener to track when user is at the bottom
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    updateIsAtBottom();
+    const onScroll = () => updateIsAtBottom();
+    el.addEventListener("scroll", onScroll);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  // Auto-scroll on new messages only if currently at bottom
+  useEffect(() => {
+    if (!atBottomRef.current) return;
+    scrollToBottom(false);
+  }, [messages]);
 
   const send = () => {
     socketRef.current?.send(
@@ -162,7 +207,7 @@ export const RoomComponent = ({ roomId = "" }) => {
   return (
     <div className="flex flex-col h-svh max-w-3xl mx-auto">
       {!!roomId && <div>Room: {roomId}</div>}
-      <div className="flex-1">
+      <div ref={listRef} className="relative flex-1 overflow-y-auto">
         {messages.map((message) => (
           <MessageRow myUUID={myUuid} message={message} key={message.id} />
         ))}
