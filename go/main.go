@@ -110,6 +110,11 @@ type MessagesEvent struct {
 	Data []Message `json:"data"`
 }
 
+type MessageEvent struct {
+	Type string  `json:"type"`
+	Data Message `json:"data"`
+}
+
 type SendEvent struct {
 	Data Message `json:"data"`
 	Room string  `json:"room"`
@@ -174,6 +179,7 @@ func handleSendEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdCon
 	message.Sender = maybeUuid
 
 	insertMessage(room, message)
+	broadcastToRoom(room, message)
 
 	return nil
 }
@@ -204,7 +210,7 @@ func messageLoop(con *websocket.Conn, userId *UserIdContainer) {
 	}
 }
 
-func addConnectionToRoom(c *websocket.Conn, room string, handle string) string {
+func addConnectionToRoom(c *websocket.Conn, room string, handle string) {
 	roomMap_, ok := state.roomClients.Load(room)
 	if !ok {
 		roomMap_ = map[string]*websocket.Conn{}
@@ -212,11 +218,25 @@ func addConnectionToRoom(c *websocket.Conn, room string, handle string) string {
 	roomMap := roomMap_.(map[string]*websocket.Conn)
 	roomMap[handle] = c
 	state.roomClients.Store(room, roomMap)
-
-	return handle
 }
 
-func removeConnectionFromRoom(room string, handle string) string {
+func broadcastToRoom(room string, message Message) {
+	roomMap_, ok := state.roomClients.Load(room)
+	if !ok {
+		roomMap_ = map[string]*websocket.Conn{}
+	}
+	roomMap := roomMap_.(map[string]*websocket.Conn)
+
+	for k := range roomMap {
+		roomMap[k].WriteJSON(MessageEvent{
+			Type: "newMessage",
+			Data: message,
+		})
+	}
+
+}
+
+func removeConnectionFromRoom(room string, handle string) {
 	roomMap_, ok := state.roomClients.Load(room)
 	if !ok {
 		roomMap_ = map[string]*websocket.Conn{}
@@ -224,8 +244,6 @@ func removeConnectionFromRoom(room string, handle string) string {
 	roomMap := roomMap_.(map[string]*websocket.Conn)
 	delete(roomMap, handle)
 	state.roomClients.Store(room, roomMap)
-
-	return handle
 }
 
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
