@@ -20,12 +20,20 @@ type Message struct {
 	Id     uuid.UUID `json:"id"`
 }
 
-type OpenedEvent_ struct {
+type OpenedEventType struct {
 	Type string `json:"type"`
 }
 
-var OpenedEvent = OpenedEvent_{
+var openedEvent = OpenedEventType{
 	Type: "opened",
+}
+
+type PingEventType struct {
+	Type string `json:"type"`
+}
+
+var pingEvent = PingEventType{
+	Type: "ping",
 }
 
 func loadMessages(key string) ([]Message, bool) {
@@ -50,8 +58,18 @@ var ws = websocket.Upgrader{
 
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	con, _ := ws.Upgrade(w, r, nil)
-	con.WriteJSON(OpenedEvent)
-	fmt.Print(con)
+	con.WriteJSON(openedEvent)
+	go (func() {
+		var writeError error = nil
+		for writeError == nil {
+			time.Sleep(time.Minute)
+			writeError = con.WriteJSON(pingEvent)
+			if writeError == nil {
+				fmt.Println("Ping sent.")
+			}
+		}
+	})()
+	fmt.Println(con)
 }
 
 func main() {
@@ -63,7 +81,7 @@ func main() {
 	})
 	val, _ := loadMessages("test")
 	json, _ := json.Marshal(val)
-	fmt.Print("res: ", string(json))
+	fmt.Println("res: ", string(json))
 
 	http.HandleFunc("/status", statusHandler)
 	http.HandleFunc("/ws", websocketHandler)
