@@ -116,6 +116,7 @@ export const RoomComponent = ({ roomId = "" }) => {
     });
 
     socket.addEventListener("open", () => {
+      setMessages([]);
       socket.send(
         JSON.stringify({
           type: "auth",

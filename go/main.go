@@ -58,10 +58,6 @@ func insertMessage(key string, newMessage Message) {
 	state.rooms.Store(key, append(old, []Message{newMessage}...))
 }
 
-func statusHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "ok")
-}
-
 var ws = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -167,15 +163,13 @@ func handleSendEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdCon
 
 	message := dat.Data
 	room := dat.Room
-	message.Sender = uuid.MustParse(userId)
-
-	loaded, ok := state.rooms.Load(room)
-	if !ok {
-		loaded = []Message{}
+	maybeUuid, err := uuid.Parse(userId)
+	if err != nil {
+		return err
 	}
-	loadedMsg := loaded.([]Message)
-	loadedMsg = append(loadedMsg, message)
-	state.rooms.Store(room, loadedMsg)
+	message.Sender = maybeUuid
+
+	insertMessage(room, message)
 
 	return nil
 }
@@ -212,17 +206,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	insertMessage("test", Message{
-		Sender: uuid.New(),
-		Id:     uuid.New(),
-		Text:   "hi",
-		Time:   time.Now(),
-	})
-	val, _ := loadMessages("test")
-	json, _ := json.Marshal(val)
-	fmt.Println("res: ", string(json))
-
-	http.HandleFunc("/status", statusHandler)
 	http.HandleFunc("/ws", websocketHandler)
 	http.ListenAndServe(":8081", nil)
 }
