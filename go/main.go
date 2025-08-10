@@ -116,8 +116,8 @@ type MessageEvent struct {
 }
 
 type SendEvent struct {
-	Data Message `json:"data"`
-	Room string  `json:"room"`
+	Message string `json:"message"`
+	Room    string `json:"room"`
 }
 
 func handleLoginEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer, handle string) error {
@@ -170,12 +170,18 @@ func handleSendEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdCon
 
 	userId := userIdContainer.userId
 
-	message := dat.Data
-	room := dat.Room
+	text := dat.Message
 	maybeUuid, err := uuid.Parse(userId)
 	if err != nil {
 		return err
 	}
+	message := Message{
+		Text:   text,
+		Sender: maybeUuid,
+		Time:   time.Now(),
+		Id:     uuid.New(),
+	}
+	room := userIdContainer.roomId
 	message.Sender = maybeUuid
 
 	insertMessage(room, message)

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { Input } from "./ui/input";
+
 interface Message {
   id: string;
   sender: string;
@@ -141,13 +143,48 @@ export const RoomComponent = ({ roomId = "" }) => {
     connectWs();
   }, []);
 
+  const [message, setMessage] = useState("");
+
+  const send = () => {
+    socketRef.current?.send(
+      JSON.stringify({
+        type: "send",
+        message,
+      })
+    );
+    setMessage("");
+  };
+
   return (
-    <div>
+    <div className="flex flex-col h-svh max-w-3xl mx-auto">
       {!!roomId && <div>Room: {roomId}</div>}
-      <div>
+      <div className="flex-1">
         {messages.map((message) => (
           <MessageRow myUUID={myUuid} message={message} key={message.id} />
         ))}
+      </div>
+      <div className="p-2">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            send();
+          }}
+        >
+          <div className="*:not-first:mt-2">
+            <div className="flex rounded-md shadow-xs">
+              <Input
+                className="-me-px flex-1 rounded-e-none shadow-none focus-visible:z-10"
+                placeholder="Message"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+              />
+              <button className="border-input bg-background text-foreground hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 inline-flex items-center rounded-e-md border px-3 text-sm font-medium transition-[color,box-shadow] outline-none focus:z-10 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50">
+                Send
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );
