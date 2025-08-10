@@ -88,7 +88,11 @@ export const RoomComponent = ({ roomId = "" }) => {
   const [messages, setMessages] = useState<Message[]>([]);
 
   // Create WebSocket connection.
-  const url = "ws://localhost:8081/ws";
+  const host =
+    process.env.NODE_ENV === "production"
+      ? "wss://go-days.fly.dev"
+      : "ws://localhost:8081";
+  const url = `${host}/ws`;
   const socketRef = useRef<WebSocket>(null);
   const socketIdRef = useRef(0);
 

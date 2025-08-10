@@ -338,7 +338,6 @@ func main() {
 	defer shutdownRelease()
 
 	server.Shutdown(shutdownCtx)
-	println("")
 
 	RoomsStr, err := state.rooms.MarshalJSON()
 	if err != nil {
@@ -360,5 +359,6 @@ func main() {
 
 	os.WriteFile("data.json", persistedData, 0644)
 
+	println("")
 	println("Goodbye.")
 }
