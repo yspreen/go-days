@@ -1,21 +1,29 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
+type MarshalSyncMap struct {
+	sync.Map
+}
+
 type AppState struct {
-	rooms       sync.Map
-	roomClients sync.Map
-	userIds     sync.Map
+	rooms       MarshalSyncMap
+	roomClients MarshalSyncMap
+	userIds     MarshalSyncMap
 }
 
 var state = AppState{}
@@ -262,7 +270,85 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	go messageLoop(con, &userId)
 }
 
+type PersistedData struct {
+	RoomsStr string
+	UsersStr string
+}
+
+func (f *MarshalSyncMap) UnmarshalJSON(data []byte) error {
+	var tmpMap map[string]interface{}
+	if err := json.Unmarshal(data, &tmpMap); err != nil {
+		return err
+	}
+	for key, value := range tmpMap {
+		f.Store(key, value)
+	}
+	return nil
+}
+
+func (f *MarshalSyncMap) MarshalJSON() ([]byte, error) {
+	tmpMap := make(map[string]interface{})
+	f.Range(func(k, v interface{}) bool {
+		tmpMap[k.(string)] = v
+		return true
+	})
+	return json.Marshal(tmpMap)
+}
+
+func tryRestore() {
+	byt, err := os.ReadFile("data.json")
+	if err != nil {
+		return
+	}
+
+	var dat PersistedData
+	if err := json.Unmarshal(byt, &dat); err != nil {
+		return
+	}
+
+	state.rooms.UnmarshalJSON([]byte(dat.RoomsStr))
+	state.userIds.UnmarshalJSON([]byte(dat.UsersStr))
+}
+
 func main() {
+	tryRestore()
+
+	server := &http.Server{
+		Addr: ":8081",
+	}
+
 	http.HandleFunc("/ws", websocketHandler)
-	http.ListenAndServe(":8081", nil)
+	go func() { http.ListenAndServe(":8081", nil) }()
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	<-signalChan
+
+	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), 3*time.Second)
+	defer shutdownRelease()
+
+	server.Shutdown(shutdownCtx)
+	println("")
+
+	RoomsStr, err := state.rooms.MarshalJSON()
+	if err != nil {
+		return
+	}
+	UsersStr, err := state.userIds.MarshalJSON()
+	if err != nil {
+		return
+	}
+
+	persisted := PersistedData{
+		RoomsStr: string(RoomsStr),
+		UsersStr: string(UsersStr),
+	}
+	persistedData, err := json.Marshal(persisted)
+	if err != nil {
+		return
+	}
+
+	os.WriteFile("data.json", persistedData, 0644)
+
+	println("Goodbye.")
 }
