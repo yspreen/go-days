@@ -275,8 +275,18 @@ type PersistedData struct {
 	UsersStr string
 }
 
-func (f *MarshalSyncMap) UnmarshalJSON(data []byte) error {
-	var tmpMap map[string]interface{}
+func (f *MarshalSyncMap) UnmarshalRooms(data []byte) error {
+	var tmpMap map[string][]Message
+	if err := json.Unmarshal(data, &tmpMap); err != nil {
+		return err
+	}
+	for key, value := range tmpMap {
+		f.Store(key, value)
+	}
+	return nil
+}
+func (f *MarshalSyncMap) UnmarshalUserIds(data []byte) error {
+	var tmpMap map[string]string
 	if err := json.Unmarshal(data, &tmpMap); err != nil {
 		return err
 	}
@@ -287,8 +297,8 @@ func (f *MarshalSyncMap) UnmarshalJSON(data []byte) error {
 }
 
 func (f *MarshalSyncMap) MarshalJSON() ([]byte, error) {
-	tmpMap := make(map[string]interface{})
-	f.Range(func(k, v interface{}) bool {
+	tmpMap := make(map[string]any)
+	f.Range(func(k, v any) bool {
 		tmpMap[k.(string)] = v
 		return true
 	})
@@ -306,8 +316,8 @@ func tryRestore() {
 		return
 	}
 
-	state.rooms.UnmarshalJSON([]byte(dat.RoomsStr))
-	state.userIds.UnmarshalJSON([]byte(dat.UsersStr))
+	state.rooms.UnmarshalRooms([]byte(dat.RoomsStr))
+	state.userIds.UnmarshalUserIds([]byte(dat.UsersStr))
 }
 
 func main() {
