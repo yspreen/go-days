@@ -8,12 +8,33 @@ interface Message {
   text: string;
   time: Date;
 }
+
 interface MessageStringDate {
   id: string;
   sender: string;
   text: string;
   time: string;
 }
+
+interface NewMessageEvent {
+  type: "newMessage";
+  data: MessageStringDate;
+}
+
+interface NewMessagesEvent {
+  type: "newMessages";
+  data: MessageStringDate[];
+}
+
+interface PingEvent {
+  type: "ping";
+}
+
+interface OpenedEvent {
+  type: "opened";
+}
+
+type WsEvent = NewMessageEvent | NewMessagesEvent | PingEvent | OpenedEvent;
 
 const MessageRow = ({
   message,
@@ -36,6 +57,12 @@ const MessageRow = ({
   );
 };
 
+function tryClose(socket: WebSocket) {
+  try {
+    socket.close();
+  } catch {}
+}
+
 export const RoomComponent = ({ roomId = "" }) => {
   const theirUUID = useRef(crypto.randomUUID());
   const nowRef = useRef(new Date());
@@ -43,57 +70,36 @@ export const RoomComponent = ({ roomId = "" }) => {
   const myUUID = useRef(crypto.randomUUID());
   const [messages, setMessages] = useState<Message[]>([]);
 
+  // Create WebSocket connection.
+  const url = "ws://localhost:8081/ws";
+  const socketRef = useRef<WebSocket>(null);
+  const socketIdRef = useRef(0);
+
+  const connectWs = () => {
+    socketRef.current = new WebSocket(url);
+    const socket = socketRef.current!;
+    const myId = (socketIdRef.current += 1);
+
+    // Listen for messages
+    socket.addEventListener("message", (event) => {
+      if (socketIdRef.current !== myId) return tryClose(socket);
+      const decoded: WsEvent = JSON.parse(event.data);
+      console.log("Message from server ", decoded);
+    });
+
+    const reconnect = () => {
+      tryClose(socket);
+      if (socketIdRef.current !== myId) return;
+      setTimeout(() => {
+        connectWs();
+      }, 500);
+    };
+    socket.addEventListener("close", reconnect);
+    socket.addEventListener("error", reconnect);
+  };
+
   useEffect(() => {
-    setMessages([
-      {
-        id: crypto.randomUUID(),
-        sender: myUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 8 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: myUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 7 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: theirUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 6 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: theirUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 5 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: theirUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 4 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: myUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 3 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: theirUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 2 * 1000),
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: myUUID.current!,
-        text: "Hey what is uup",
-        time: new Date(nowRef.current!.getTime() - 1 * 1000),
-      },
-    ]);
+    connectWs();
     setTimeout(() => {
       setMessages((old) => [
         ...old,
