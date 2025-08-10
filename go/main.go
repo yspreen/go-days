@@ -13,8 +13,9 @@ import (
 )
 
 type AppState struct {
-	rooms   sync.Map
-	userIds sync.Map
+	rooms       sync.Map
+	roomClients sync.Map
+	userIds     sync.Map
 }
 
 var state = AppState{}
@@ -77,11 +78,12 @@ func pingLoop(con *websocket.Conn) {
 
 type UserIdContainer struct {
 	userId       string
+	roomId       string
 	userIdWasSet bool
 	mutex        sync.Mutex
 }
 
-func (u *UserIdContainer) set(id string) bool {
+func (u *UserIdContainer) set(id string, roomId string) bool {
 	defer u.mutex.Unlock()
 
 	u.mutex.Lock()
@@ -90,6 +92,7 @@ func (u *UserIdContainer) set(id string) bool {
 	}
 	u.userIdWasSet = true
 	u.userId = id
+	u.roomId = roomId
 	return true
 }
 
@@ -112,7 +115,7 @@ type SendEvent struct {
 	Room string  `json:"room"`
 }
 
-func handleLoginEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer) error {
+func handleLoginEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer, handle string) error {
 	var dat AuthEvent
 	if err := json.Unmarshal(byt, &dat); err != nil {
 		return err
@@ -127,7 +130,7 @@ func handleLoginEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdCo
 	}
 
 	userId := userIdLoad.(string)
-	if !userIdContainer.set(userId) {
+	if !userIdContainer.set(userId, dat.RoomId) {
 		return errors.New("set id not ok")
 	}
 
@@ -145,6 +148,7 @@ func handleLoginEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdCo
 		Type: "newMessages",
 		Data: msg.([]Message),
 	})
+	addConnectionToRoom(con, dat.RoomId, handle)
 
 	return nil
 }
@@ -175,9 +179,14 @@ func handleSendEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdCon
 }
 
 func messageLoop(con *websocket.Conn, userId *UserIdContainer) {
+	handle := uuid.NewString()
+
 	for {
 		_, byt, err := con.ReadMessage()
 		if err != nil {
+			if userId.userIdWasSet {
+				removeConnectionFromRoom(userId.roomId, handle)
+			}
 			return
 		}
 
@@ -188,11 +197,35 @@ func messageLoop(con *websocket.Conn, userId *UserIdContainer) {
 
 		switch dat.Type {
 		case "auth":
-			handleLoginEvent(con, byt, userId)
+			handleLoginEvent(con, byt, userId, handle)
 		case "send":
 			handleSendEvent(con, byt, userId)
 		}
 	}
+}
+
+func addConnectionToRoom(c *websocket.Conn, room string, handle string) string {
+	roomMap_, ok := state.roomClients.Load(room)
+	if !ok {
+		roomMap_ = map[string]*websocket.Conn{}
+	}
+	roomMap := roomMap_.(map[string]*websocket.Conn)
+	roomMap[handle] = c
+	state.roomClients.Store(room, roomMap)
+
+	return handle
+}
+
+func removeConnectionFromRoom(room string, handle string) string {
+	roomMap_, ok := state.roomClients.Load(room)
+	if !ok {
+		roomMap_ = map[string]*websocket.Conn{}
+	}
+	roomMap := roomMap_.(map[string]*websocket.Conn)
+	delete(roomMap, handle)
+	state.roomClients.Store(room, roomMap)
+
+	return handle
 }
 
 func websocketHandler(w http.ResponseWriter, r *http.Request) {

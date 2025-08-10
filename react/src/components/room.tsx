@@ -121,6 +121,7 @@ export const RoomComponent = ({ roomId = "" }) => {
         JSON.stringify({
           type: "auth",
           secret: localStorage.getItem("secret") || "",
+          roomId,
         })
       );
     });
