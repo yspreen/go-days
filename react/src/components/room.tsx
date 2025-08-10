@@ -74,10 +74,14 @@ function tryClose(socket: WebSocket) {
   } catch {}
 }
 
-export const RoomComponent = ({ roomId = "" }) => {
-  const theirUUID = useRef(crypto.randomUUID());
-  const nowRef = useRef(new Date());
+function parseWsMessage(msg: MessageStringDate) {
+  return {
+    ...msg,
+    time: new Date(msg.time),
+  };
+}
 
+export const RoomComponent = ({ roomId = "" }) => {
   const [myUuid, setMyUuid] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
 
@@ -90,6 +94,12 @@ export const RoomComponent = ({ roomId = "" }) => {
     if (event.type === "authResponse") {
       setMyUuid(event.userId);
       localStorage.setItem("secret", event.secret);
+    }
+    if (event.type === "newMessage") {
+      setMessages((old) => [...old, parseWsMessage(event.data)]);
+    }
+    if (event.type === "newMessages") {
+      setMessages((old) => [...old, ...event.data.map(parseWsMessage)]);
     }
   };
 
@@ -127,17 +137,6 @@ export const RoomComponent = ({ roomId = "" }) => {
 
   useEffect(() => {
     connectWs();
-    setTimeout(() => {
-      setMessages((old) => [
-        ...old,
-        {
-          id: crypto.randomUUID(),
-          sender: theirUUID.current!,
-          text: "Hey what is uup",
-          time: nowRef.current!,
-        },
-      ]);
-    }, 1000);
   }, []);
 
   return (

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -84,27 +85,39 @@ type UserIdContainer struct {
 	mutex        sync.Mutex
 }
 
-func (u *UserIdContainer) set(id string) {
+func (u *UserIdContainer) set(id string) bool {
 	defer u.mutex.Unlock()
 
 	u.mutex.Lock()
 	if u.userIdWasSet {
-		return
+		return false
 	}
 	u.userIdWasSet = true
 	u.userId = id
+	return true
 }
 
-type SomeMessage struct {
+type SomeEvent struct {
 	Type string `json:"type"`
 }
 
-type LoginMessage struct {
+type AuthEvent struct {
 	Secret string `json:"secret"`
+	RoomId string `json:"roomId"`
 }
 
-func handleLoginMessage(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer) error {
-	var dat LoginMessage
+type MessagesEvent struct {
+	Type string    `json:"type"`
+	Data []Message `json:"data"`
+}
+
+type SendEvent struct {
+	Data Message `json:"data"`
+	Room string  `json:"room"`
+}
+
+func handleLoginEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer) error {
+	var dat AuthEvent
 	if err := json.Unmarshal(byt, &dat); err != nil {
 		return err
 	}
@@ -118,13 +131,51 @@ func handleLoginMessage(con *websocket.Conn, byt []byte, userIdContainer *UserId
 	}
 
 	userId := userIdLoad.(string)
-	userIdContainer.set(userId)
+	if !userIdContainer.set(userId) {
+		return errors.New("set id not ok")
+	}
 
 	con.WriteJSON(AuthResponseEventType{
 		Type:   "authResponse",
 		Secret: secret,
 		UserId: userId,
 	})
+
+	msg, ok := state.rooms.Load(dat.RoomId)
+	if !ok {
+		msg = []Message{}
+	}
+	con.WriteJSON(MessagesEvent{
+		Type: "newMessages",
+		Data: msg.([]Message),
+	})
+
+	return nil
+}
+
+func handleSendEvent(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer) error {
+	var dat SendEvent
+	if err := json.Unmarshal(byt, &dat); err != nil {
+		return err
+	}
+
+	if !userIdContainer.userIdWasSet {
+		return errors.New("not logged in")
+	}
+
+	userId := userIdContainer.userId
+
+	message := dat.Data
+	room := dat.Room
+	message.Sender = uuid.MustParse(userId)
+
+	loaded, ok := state.rooms.Load(room)
+	if !ok {
+		loaded = []Message{}
+	}
+	loadedMsg := loaded.([]Message)
+	loadedMsg = append(loadedMsg, message)
+	state.rooms.Store(room, loadedMsg)
 
 	return nil
 }
@@ -136,14 +187,16 @@ func messageLoop(con *websocket.Conn, userId *UserIdContainer) {
 			return
 		}
 
-		var dat SomeMessage
+		var dat SomeEvent
 		if err := json.Unmarshal(byt, &dat); err != nil {
 			continue
 		}
 
 		switch dat.Type {
 		case "auth":
-			handleLoginMessage(con, byt, userId)
+			handleLoginEvent(con, byt, userId)
+		case "send":
+			handleSendEvent(con, byt, userId)
 		}
 	}
 }
