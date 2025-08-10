@@ -34,7 +34,18 @@ interface OpenedEvent {
   type: "opened";
 }
 
-type WsEvent = NewMessageEvent | NewMessagesEvent | PingEvent | OpenedEvent;
+interface AuthResponseEvent {
+  type: "authResponse";
+  secret: string;
+  userId: string;
+}
+
+type WsEvent =
+  | NewMessageEvent
+  | NewMessagesEvent
+  | PingEvent
+  | OpenedEvent
+  | AuthResponseEvent;
 
 const MessageRow = ({
   message,
@@ -67,13 +78,20 @@ export const RoomComponent = ({ roomId = "" }) => {
   const theirUUID = useRef(crypto.randomUUID());
   const nowRef = useRef(new Date());
 
-  const myUUID = useRef(crypto.randomUUID());
+  const [myUuid, setMyUuid] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
 
   // Create WebSocket connection.
   const url = "ws://localhost:8081/ws";
   const socketRef = useRef<WebSocket>(null);
   const socketIdRef = useRef(0);
+
+  const handleMessage = (event: WsEvent) => {
+    if (event.type === "authResponse") {
+      setMyUuid(event.userId);
+      localStorage.setItem("secret", event.secret);
+    }
+  };
 
   const connectWs = () => {
     socketRef.current = new WebSocket(url);
@@ -83,8 +101,17 @@ export const RoomComponent = ({ roomId = "" }) => {
     // Listen for messages
     socket.addEventListener("message", (event) => {
       if (socketIdRef.current !== myId) return tryClose(socket);
-      const decoded: WsEvent = JSON.parse(event.data);
-      console.log("Message from server ", decoded);
+
+      handleMessage(JSON.parse(event.data));
+    });
+
+    socket.addEventListener("open", () => {
+      socket.send(
+        JSON.stringify({
+          type: "auth",
+          secret: localStorage.getItem("secret") || "",
+        })
+      );
     });
 
     const reconnect = () => {
@@ -118,11 +145,7 @@ export const RoomComponent = ({ roomId = "" }) => {
       {!!roomId && <div>Room: {roomId}</div>}
       <div>
         {messages.map((message) => (
-          <MessageRow
-            myUUID={myUUID.current!}
-            message={message}
-            key={message.id}
-          />
+          <MessageRow myUUID={myUuid} message={message} key={message.id} />
         ))}
       </div>
     </div>

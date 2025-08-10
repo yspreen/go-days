@@ -11,7 +11,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var syncMap sync.Map
+type AppState struct {
+	rooms   sync.Map
+	userIds sync.Map
+}
+
+var state = AppState{}
 
 type Message struct {
 	Sender uuid.UUID `json:"sender"`
@@ -22,6 +27,12 @@ type Message struct {
 
 type OpenedEventType struct {
 	Type string `json:"type"`
+}
+
+type AuthResponseEventType struct {
+	Type   string `json:"type"`
+	Secret string `json:"secret"`
+	UserId string `json:"userId"`
 }
 
 var openedEvent = OpenedEventType{
@@ -37,13 +48,13 @@ var pingEvent = PingEventType{
 }
 
 func loadMessages(key string) ([]Message, bool) {
-	val, ok := syncMap.LoadOrStore(key, []Message{})
+	val, ok := state.rooms.LoadOrStore(key, []Message{})
 	return val.([]Message), ok
 }
 
 func insertMessage(key string, newMessage Message) {
 	old, _ := loadMessages(key)
-	syncMap.Store(key, append(old, []Message{newMessage}...))
+	state.rooms.Store(key, append(old, []Message{newMessage}...))
 }
 
 func statusHandler(w http.ResponseWriter, r *http.Request) {
@@ -56,20 +67,95 @@ var ws = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
+func pingLoop(con *websocket.Conn) {
+	var writeError error = nil
+	for writeError == nil {
+		time.Sleep(time.Minute)
+		writeError = con.WriteJSON(pingEvent)
+		if writeError == nil {
+			fmt.Println("Ping sent.")
+		}
+	}
+}
+
+type UserIdContainer struct {
+	userId       string
+	userIdWasSet bool
+	mutex        sync.Mutex
+}
+
+func (u *UserIdContainer) set(id string) {
+	defer u.mutex.Unlock()
+
+	u.mutex.Lock()
+	if u.userIdWasSet {
+		return
+	}
+	u.userIdWasSet = true
+	u.userId = id
+}
+
+type SomeMessage struct {
+	Type string `json:"type"`
+}
+
+type LoginMessage struct {
+	Secret string `json:"secret"`
+}
+
+func handleLoginMessage(con *websocket.Conn, byt []byte, userIdContainer *UserIdContainer) error {
+	var dat LoginMessage
+	if err := json.Unmarshal(byt, &dat); err != nil {
+		return err
+	}
+
+	secret := dat.Secret
+	userIdLoad, ok := state.userIds.Load(secret)
+	if !ok {
+		secret = uuid.NewString()
+		userIdLoad = uuid.NewString()
+		state.userIds.Store(secret, userIdLoad)
+	}
+
+	userId := userIdLoad.(string)
+	userIdContainer.set(userId)
+
+	con.WriteJSON(AuthResponseEventType{
+		Type:   "authResponse",
+		Secret: secret,
+		UserId: userId,
+	})
+
+	return nil
+}
+
+func messageLoop(con *websocket.Conn, userId *UserIdContainer) {
+	for {
+		_, byt, err := con.ReadMessage()
+		if err != nil {
+			return
+		}
+
+		var dat SomeMessage
+		if err := json.Unmarshal(byt, &dat); err != nil {
+			continue
+		}
+
+		switch dat.Type {
+		case "auth":
+			handleLoginMessage(con, byt, userId)
+		}
+	}
+}
+
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	con, _ := ws.Upgrade(w, r, nil)
 	con.WriteJSON(openedEvent)
-	go (func() {
-		var writeError error = nil
-		for writeError == nil {
-			time.Sleep(time.Minute)
-			writeError = con.WriteJSON(pingEvent)
-			if writeError == nil {
-				fmt.Println("Ping sent.")
-			}
-		}
-	})()
-	fmt.Println(con)
+
+	userId := UserIdContainer{}
+
+	go pingLoop(con)
+	go messageLoop(con, &userId)
 }
 
 func main() {
